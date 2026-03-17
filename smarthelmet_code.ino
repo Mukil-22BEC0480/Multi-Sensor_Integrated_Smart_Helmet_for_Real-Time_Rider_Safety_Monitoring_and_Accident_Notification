@@ -1,5 +1,17 @@
 #include <TinyGPSPlus.h>
 #include <HardwareSerial.h>
+#include <DHT.h>
+
+#define DHTPIN 27          // GPIO pin for DHT sensor
+#define DHTTYPE DHT11    // Change to DHT22 if needed
+#define TEMP_THRESHOLD 40.0
+bool tempPrinted = false;
+bool alcoholStatusPrinted = false;
+bool sleepStatusPrinted = false;
+
+DHT dht(DHTPIN, DHTTYPE);
+bool highTempDetected = false;
+
 
 // ---------- PIN DEFINITIONS ----------
 #define MQ3_PIN 34           // MQ-3 alcohol sensor (analog)
@@ -30,6 +42,9 @@ void setup() {
   pinMode(MQ3_PIN, INPUT);
   pinMode(SW420_PIN, INPUT);
   pinMode(EYE_ANALOG_PIN, INPUT);
+  dht.begin();
+  Serial.println("🌡️ Helmet Temperature Monitoring Enabled");
+
 
   gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
 
@@ -76,11 +91,12 @@ void setup() {
 
 // ---------- MAIN LOOP ----------
 void loop() {
-  detectAlcohol();         // Step 1: Alcohol detection
-  if (!alcoholDetected) {  // Step 2: Sleep detection only if sober
+  detectAlcohol();          // Step 1
+  if (!alcoholDetected) {   // Step 2
     detectSleep();
   }
-  detectAccident();        // Step 3: Accident detection (GPS only)
+  detectHelmetTemperature(); // 🌡️ NEW: Temperature check
+  detectAccident();         // Step 3
   delay(100);
 }
 
@@ -89,14 +105,36 @@ void detectAlcohol() {
   int val = analogRead(MQ3_PIN);
   bool isDrunk = val > alcoholThreshold;
 
+  // 🔹 PRINT STATUS ONCE AFTER CALIBRATION
+  if (!alcoholStatusPrinted) {
+    Serial.println("🍺 Alcohol Status Check (After Calibration)");
+    Serial.print("🍺 MQ-3 Sensor Value: ");
+    Serial.println(val);
+    Serial.print("🍺 Alcohol Threshold: ");
+    Serial.println(alcoholThreshold);
+
+    if (isDrunk) {
+      Serial.println("🚨 STATUS: RIDER IS DRUNK");
+    } else {
+      Serial.println("✅ STATUS: RIDER IS NOT DRUNK");
+    }
+
+    Serial.println("----------------------------------");
+    alcoholStatusPrinted = true;
+  }
+
+  // 🔹 NORMAL STATE-CHANGE LOGIC
   if (isDrunk && !alcoholDetected) {
     alcoholDetected = true;
     Serial.println("🚨 Alcohol detected — rider is drunk!");
-  } else if (!isDrunk && alcoholDetected) {
+  }
+  else if (!isDrunk && alcoholDetected) {
     alcoholDetected = false;
     Serial.println("✅ Rider is sober — alcohol-free.");
   }
 }
+
+
 
 // ---------- SLEEP / DROWSINESS DETECTION ----------
 void detectSleep() {
@@ -110,19 +148,33 @@ void detectSleep() {
   }
   int sensorValue = t / SAMPLES;
 
+  // 👁️ Eyes CLOSED
   if (sensorValue < EYE_CLOSED_THRESHOLD) {
     if (closeCount < STABLE_CLOSE_COUNT) closeCount++;
+
     if (closeCount >= STABLE_CLOSE_COUNT && !drowsinessDetected) {
       drowsinessDetected = true;
-      Serial.println("😴 Drowsiness Detected (Eyes Closed)!");
+      sleepStatusPrinted = false; // allow printing
+
+      Serial.println("😴 STATUS: RIDER IS DROWSY (Eyes Closed)");
     }
-  } else {
-    if (closeCount != 0 || drowsinessDetected) {
-      closeCount = 0;
+  }
+  // 👁️ Eyes OPEN
+  else {
+    closeCount = 0;
+
+    if (drowsinessDetected) {
       drowsinessDetected = false;
+      sleepStatusPrinted = false; // allow printing
+    }
+
+    if (!sleepStatusPrinted) {
+      Serial.println("👁️ STATUS: RIDER IS AWAKE (Not Drowsy)");
+      sleepStatusPrinted = true;
     }
   }
 }
+
 
 // ---------- ACCIDENT DETECTION ----------
 void detectAccident() {
@@ -156,3 +208,36 @@ void getAccidentLocation() {
     Serial.println("⚠️ GPS location not found (no fix)");
   }
 }
+void detectHelmetTemperature() {
+  static unsigned long lastRead = 0;
+  if (millis() - lastRead < 2000) return; // DHT needs 2s gap
+  lastRead = millis();
+
+  float temp = dht.readTemperature(); // Celsius
+
+  if (isnan(temp)) {
+    Serial.println("❌ Temperature sensor error");
+    return;
+  }
+
+  // ✅ PRINT TEMPERATURE ONLY ONCE
+  if (!tempPrinted) {
+    Serial.print("🌡️ Helmet Temperature: ");
+    Serial.print(temp);
+    Serial.println(" °C");
+    tempPrinted = true;
+  }
+
+  // ⚠️ Warning logic still works
+  if (temp >= TEMP_THRESHOLD && !highTempDetected) {
+    highTempDetected = true;
+    Serial.println("⚠️ WARNING: High helmet temperature!");
+    Serial.println("⚠️ Rider may feel dizzy. Please stop and rest.");
+  }
+  else if (temp < TEMP_THRESHOLD && highTempDetected) {
+    highTempDetected = false;
+    Serial.println("✅ Helmet temperature back to safe level.");
+  }
+}
+
+
