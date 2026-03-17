@@ -69,6 +69,7 @@ The system is built around the **ESP32 microcontroller**, which processes real-t
 
 ## 🖼️ Hardware Prototype
 
+<img width="867" height="898" alt="CIRCUIT1 (1)" src="https://github.com/user-attachments/assets/fb39239c-0268-4fad-af95-86b1c58b9fec" />
 
 
 ---
